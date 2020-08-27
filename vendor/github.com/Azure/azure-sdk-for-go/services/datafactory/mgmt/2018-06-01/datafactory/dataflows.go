@@ -19,11 +19,12 @@ package datafactory
 
 import (
 	"context"
+	"net/http"
+
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/validation"
 	"github.com/Azure/go-autorest/tracing"
-	"net/http"
 )
 
 // DataFlowsClient is the the Azure Data Factory V2 management API provides a RESTful set of web services that interact

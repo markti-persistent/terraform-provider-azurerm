@@ -29,6 +29,7 @@ func (r Registration) SupportedDataSources() map[string]*schema.Resource {
 func (r Registration) SupportedResources() map[string]*schema.Resource {
 	return map[string]*schema.Resource{
 		"azurerm_data_factory":                                       resourceArmDataFactory(),
+		"azurerm_data_factory_dataflow_mapping":                      resourceArmDataFactoryDataFlowMapping(),
 		"azurerm_data_factory_dataset_azure_blob":                    resourceArmDataFactoryDatasetAzureBlob(),
 		"azurerm_data_factory_dataset_cosmosdb_sqlapi":               resourceArmDataFactoryDatasetCosmosDbSQLAPI(),
 		"azurerm_data_factory_dataset_delimited_text":                resourceArmDataFactoryDatasetDelimitedText(),

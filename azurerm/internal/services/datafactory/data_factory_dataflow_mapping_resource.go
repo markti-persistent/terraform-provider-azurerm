@@ -5,7 +5,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/latest/keyvault/mgmt/keyvault"
 	"github.com/Azure/azure-sdk-for-go/services/datafactory/mgmt/2018-06-01/datafactory"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
@@ -17,12 +16,12 @@ import (
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/utils"
 )
 
-func resourceArmDataFactoryDataFlow() *schema.Resource {
+func resourceArmDataFactoryDataFlowMapping() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceArmDataFactoryDataFlowCreateUpdate,
-		Read:   resourceArmDataFactoryDataFlowRead,
-		Update: resourceArmDataFactoryDataFlowCreateUpdate,
-		Delete: resourceArmDataFactoryDataFlowDelete,
+		Create: resourceArmDataFactoryMappingDataFlowCreateUpdate,
+		Read:   resourceArmDataFactoryMappingDataFlowRead,
+		Update: resourceArmDataFactoryMappingDataFlowCreateUpdate,
+		Delete: resourceArmDataFactoryMappingDataFlowDelete,
 		Importer: &schema.ResourceImporter{
 			State: schema.ImportStatePassthrough,
 		},
@@ -39,7 +38,7 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 				Type:         schema.TypeString,
 				Required:     true,
 				ForceNew:     true,
-				ValidateFunc: validate.DataFactoryPipelineAndTriggerName(),
+				ValidateFunc: validateAzureRMDataFactoryDataFlowName,
 			},
 
 			// There's a bug in the Azure API where this is returned in lower-case
@@ -55,7 +54,7 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 
 			"source": {
 				Type:     schema.TypeList,
-				Optional: true,
+				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"name": {
@@ -63,12 +62,7 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 							Required:     true,
 							ValidateFunc: validation.StringIsNotEmpty,
 						},
-						"reference_name": {
-							Type:         schema.TypeString,
-							Required:     true,
-							ValidateFunc: validation.StringIsNotEmpty,
-						},
-						"reference_type": {
+						"dataset_name": {
 							Type:         schema.TypeString,
 							Required:     true,
 							ValidateFunc: validation.StringIsNotEmpty,
@@ -79,7 +73,7 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 
 			"sink": {
 				Type:     schema.TypeList,
-				Optional: true,
+				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"name": {
@@ -87,12 +81,7 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 							Required:     true,
 							ValidateFunc: validation.StringIsNotEmpty,
 						},
-						"reference_name": {
-							Type:         schema.TypeString,
-							Required:     true,
-							ValidateFunc: validation.StringIsNotEmpty,
-						},
-						"reference_type": {
+						"dataset_name": {
 							Type:         schema.TypeString,
 							Required:     true,
 							ValidateFunc: validation.StringIsNotEmpty,
@@ -101,18 +90,24 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 				},
 			},
 
-			"pipeline_name": {
-				Type:         schema.TypeString,
-				Required:     true,
-				ValidateFunc: validate.DataFactoryPipelineAndTriggerName(),
+			"transformation": {
+				Type:     schema.TypeList,
+				Required: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"name": {
+							Type:         schema.TypeString,
+							Required:     true,
+							ValidateFunc: validation.StringIsNotEmpty,
+						},
+					},
+				},
 			},
 
-			"pipeline_parameters": {
-				Type:     schema.TypeMap,
-				Optional: true,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-				},
+			"script": {
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringIsNotEmpty,
 			},
 
 			"annotations": {
@@ -123,86 +118,99 @@ func resourceArmDataFactoryDataFlow() *schema.Resource {
 					ValidateFunc: validation.StringIsNotEmpty,
 				},
 			},
+
+			"description": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				ValidateFunc: validation.StringIsNotEmpty,
+			},
+
+			"folder": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				ValidateFunc: validation.StringIsNotEmpty,
+			},
 		},
 	}
 }
 
-func resourceArmDataFactoryDataFlowCreateUpdate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).DataFactory.TriggersClient
+func resourceArmDataFactoryMappingDataFlowCreateUpdate(d *schema.ResourceData, meta interface{}) error {
+
+	client := meta.(*clients.Client).DataFactory.DataFlowsClient
 	ctx, cancel := timeouts.ForCreateUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	log.Printf("[INFO] preparing arguments for Data Factory Trigger Schedule creation.")
+	log.Printf("[INFO] preparing arguments for Data Factory Mapping Data Flow creation.")
 
 	resourceGroupName := d.Get("resource_group_name").(string)
-	triggerName := d.Get("name").(string)
+	name := d.Get("name").(string)
 	dataFactoryName := d.Get("data_factory_name").(string)
 
 	if d.IsNewResource() {
-		existing, err := client.Get(ctx, resourceGroupName, dataFactoryName, triggerName, "")
+		existing, err := client.Get(ctx, resourceGroupName, dataFactoryName, name, "")
 		if err != nil {
 			if !utils.ResponseWasNotFound(existing.Response) {
-				return fmt.Errorf("Error checking for presence of existing Data Factory Trigger Schedule %q (Resource Group %q / Data Factory %q): %s", triggerName, resourceGroupName, dataFactoryName, err)
+				return fmt.Errorf("Error checking for presence of existing Data Factory Mapping Data Flow %q (Resource Group %q / Data Factory %q): %s", name, resourceGroupName, dataFactoryName, err)
 			}
 		}
 
 		if existing.ID != nil && *existing.ID != "" {
-			return tf.ImportAsExistsError("azurerm_data_factory_trigger_schedule", *existing.ID)
+			return tf.ImportAsExistsError("azurerm_data_factory_dataflow_mapping", *existing.ID)
 		}
 	}
 
 	dataSources := d.Get("source").([]interface{})
-	dataSinks := d.Get("source").([]interface{})
+	dataSinks := d.Get("sink").([]interface{})
+	transformations := d.Get("transformation").([]interface{})
+	script := d.Get("script").(string)
+
+	fmt.Print(dataSources)
+	fmt.Print(dataSinks)
+
+	loadedDataSources := expandDataFactoryMappingDataFlowSources(dataSources)
+	loadedDataSinks := expandDataFactoryMappingDataFlowSinks(dataSinks)
+	loadedTransformations := expandDataFactoryMappingDataFlowTransformations(transformations)
 
 	props := &datafactory.MappingDataFlowTypeProperties{
-		Sources: expandDataFactoryMappingDataFlowSources(dataSources),
-		Sinks: expandDataFactoryMappingDataFlowSinks(dataSinks)
+		Sources:         &loadedDataSources,
+		Sinks:           &loadedDataSinks,
+		Transformations: &loadedTransformations,
+		Script:          &script,
 	}
 
-	reference := &datafactory.PipelineReference{
-		ReferenceName: utils.String(d.Get("pipeline_name").(string)),
-		Type:          utils.String("PipelineReference"),
-	}
-
-	scheduleProps := &datafactory.MappingDataFlow{
+	mappingDataFlow := &datafactory.MappingDataFlow{
 		MappingDataFlowTypeProperties: props,
-		Pipelines: &[]datafactory.TriggerPipelineReference{
-			{
-				PipelineReference: reference,
-				Parameters:        d.Get("pipeline_parameters").(map[string]interface{}),
-			},
-		},
 	}
 
 	if v, ok := d.GetOk("annotations"); ok {
 		annotations := v.([]interface{})
-		scheduleProps.Annotations = &annotations
+		mappingDataFlow.Annotations = &annotations
 	}
 
-	trigger := datafactory.TriggerResource{
-		Properties: scheduleProps,
+	dataFlow := datafactory.DataFlowResource{
+		Properties: mappingDataFlow,
 	}
 
-	if _, err := client.CreateOrUpdate(ctx, resourceGroupName, dataFactoryName, triggerName, trigger, ""); err != nil {
-		return fmt.Errorf("Error creating Data Factory Trigger Schedule %q (Resource Group %q / Data Factory %q): %+v", triggerName, resourceGroupName, dataFactoryName, err)
+	if _, err := client.CreateOrUpdate(ctx, resourceGroupName, dataFactoryName, name, dataFlow, ""); err != nil {
+		return fmt.Errorf("Error creating Data Factory Mapping Data Flow %q (Resource Group %q / Data Factory %q): %+v", name, resourceGroupName, dataFactoryName, err)
 	}
 
-	read, err := client.Get(ctx, resourceGroupName, dataFactoryName, triggerName, "")
+	read, err := client.Get(ctx, resourceGroupName, dataFactoryName, name, "")
 	if err != nil {
-		return fmt.Errorf("Error retrieving Data Factory Trigger Schedule %q (Resource Group %q / Data Factory %q): %+v", triggerName, resourceGroupName, dataFactoryName, err)
+		return fmt.Errorf("Error retrieving Data Factory Mapping Data Flow %q (Resource Group %q / Data Factory %q): %+v", name, resourceGroupName, dataFactoryName, err)
 	}
 
 	if read.ID == nil {
-		return fmt.Errorf("Cannot read Data Factory Trigger Schedule %q (Resource Group %q / Data Factory %q) ID", triggerName, resourceGroupName, dataFactoryName)
+		return fmt.Errorf("Cannot read Data Factory Mapping Data Flow %q (Resource Group %q / Data Factory %q) ID", name, resourceGroupName, dataFactoryName)
 	}
 
 	d.SetId(*read.ID)
 
-	return resourceArmDataFactoryDataFlowRead(d, meta)
+	return resourceArmDataFactoryMappingDataFlowRead(d, meta)
 }
 
-func resourceArmDataFactoryDataFlowRead(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).DataFactory.TriggersClient
+func resourceArmDataFactoryMappingDataFlowRead(d *schema.ResourceData, meta interface{}) error {
+	client := meta.(*clients.Client).DataFactory.DataFlowsClient
 	ctx, cancel := timeouts.ForCreateUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
@@ -210,17 +218,18 @@ func resourceArmDataFactoryDataFlowRead(d *schema.ResourceData, meta interface{}
 	if err != nil {
 		return err
 	}
+	fmt.Print(id.Path)
 	dataFactoryName := id.Path["factories"]
-	triggerName := id.Path["triggers"]
+	dataflowName := id.Path["dataflows"]
 
-	resp, err := client.Get(ctx, id.ResourceGroup, dataFactoryName, triggerName, "")
+	resp, err := client.Get(ctx, id.ResourceGroup, dataFactoryName, dataflowName, "")
 	if err != nil {
 		if utils.ResponseWasNotFound(resp.Response) {
 			d.SetId("")
-			log.Printf("[DEBUG] Data Factory Trigger Schedule %q was not found in Resource Group %q - removing from state!", triggerName, id.ResourceGroup)
+			log.Printf("[DEBUG] Data Factory Mapping Data Flow %q was not found in Resource Group %q - removing from state!", dataflowName, id.ResourceGroup)
 			return nil
 		}
-		return fmt.Errorf("Error reading the state of Data Factory Trigger Schedule %q: %+v", triggerName, err)
+		return fmt.Errorf("Error reading the state of Data Factory Mapping Data Flow %q: %+v", dataflowName, err)
 	}
 
 	d.Set("name", resp.Name)
@@ -229,32 +238,44 @@ func resourceArmDataFactoryDataFlowRead(d *schema.ResourceData, meta interface{}
 
 	dataFlowProps, ok := resp.Properties.AsMappingDataFlow()
 	if !ok {
-		return fmt.Errorf("Error classifiying Data Factory Trigger Schedule %q (Data Factory %q / Resource Group %q): Expected: %q Received: %q", triggerName, dataFactoryName, id.ResourceGroup, datafactory.TypeScheduleTrigger, *resp.Type)
+		return fmt.Errorf("Error classifiying Data Factory Mapping Data Flow %q (Data Factory %q / Resource Group %q): Expected: %q Received: %q", dataflowName, dataFactoryName, id.ResourceGroup, datafactory.TypeMappingDataFlow, *resp.Type)
 	}
 
 	if dataFlowProps != nil {
 
-		if pipelines := scheduleTriggerProps.Pipelines; pipelines != nil {
-			if len(*pipelines) > 0 {
-				pipeline := *pipelines
-				if reference := pipeline[0].PipelineReference; reference != nil {
-					d.Set("pipeline_name", reference.ReferenceName)
-				}
-				d.Set("pipeline_parameters", pipeline[0].Parameters)
+		if err := d.Set("sources", flattenDataFactoryMappingDataFlowSources(*dataFlowProps.Sources)); err != nil {
+			return fmt.Errorf("setting `sources`: %s", err)
+		}
+
+		if err := d.Set("sinks", flattenDataFactoryMappingDataFlowSinks(*dataFlowProps.Sinks)); err != nil {
+			return fmt.Errorf("setting `sinks`: %s", err)
+		}
+
+		if err := d.Set("transformations", flattenDataFactoryMappingDataFlowTransformations(*dataFlowProps.Transformations)); err != nil {
+			return fmt.Errorf("setting `transformations`: %s", err)
+		}
+
+		annotations := flattenDataFactoryAnnotations(dataFlowProps.Annotations)
+		if err := d.Set("annotations", annotations); err != nil {
+			return fmt.Errorf("Error setting `annotations`: %+v", err)
+		}
+
+		if folder := dataFlowProps.Folder; folder != nil {
+			if folder.Name != nil {
+				d.Set("folder", folder.Name)
 			}
 		}
 
-		annotations := flattenDataFactoryAnnotations(scheduleTriggerProps.Annotations)
-		if err := d.Set("annotations", annotations); err != nil {
-			return fmt.Errorf("Error setting `annotations`: %+v", err)
+		if dataFlowProps.Description != nil {
+			d.Set("description", dataFlowProps.Description)
 		}
 	}
 
 	return nil
 }
 
-func resourceArmDataFactoryDataFlowDelete(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).DataFactory.TriggersClient
+func resourceArmDataFactoryMappingDataFlowDelete(d *schema.ResourceData, meta interface{}) error {
+	client := meta.(*clients.Client).DataFactory.DataFlowsClient
 	ctx, cancel := timeouts.ForCreateUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
@@ -263,28 +284,119 @@ func resourceArmDataFactoryDataFlowDelete(d *schema.ResourceData, meta interface
 		return err
 	}
 	dataFactoryName := id.Path["factories"]
-	triggerName := id.Path["triggers"]
+	dataflowName := id.Path["dataflows"]
 
-	if _, err = client.Delete(ctx, id.ResourceGroup, dataFactoryName, triggerName); err != nil {
-		return fmt.Errorf("Error deleting Data Factory Trigger Schedule %q (Resource Group %q / Data Factory %q): %+v", triggerName, id.ResourceGroup, dataFactoryName, err)
+	if _, err = client.Delete(ctx, id.ResourceGroup, dataFactoryName, dataflowName); err != nil {
+		return fmt.Errorf("Error deleting Data Factory Mapping Data Flow %q (Resource Group %q / Data Factory %q): %+v", dataflowName, id.ResourceGroup, dataFactoryName, err)
 	}
 
 	return nil
 }
 
-//props := d.Get("http_server_location").([]interface{})
-//*[]keyvault.StoragePermissions
-func expandDataFactoryMappingDataFlowSources(input []interface{}) *[]datafactory.DataFlowSource {
-
+// Read Data Source blocks
+func expandDataFactoryMappingDataFlowSources(input []interface{}) []datafactory.DataFlowSource {
 	output := make([]datafactory.DataFlowSource, 0)
-
-	for _, permission := range input {
-		output = append(output, keyvault.StoragePermissions(permission.(string)))
+	for _, source := range input {
+		output = append(output, expandDataFactoryMappingDataFlowSource(source))
 	}
-
-	return &output
+	return output
+}
+func expandDataFactoryMappingDataFlowSource(input interface{}) datafactory.DataFlowSource {
+	fmt.Print(input)
+	sourceBlock := input.(map[string]interface{})
+	// prepare object
+	datasetReferenceType := "DatasetReference"
+	referenceName := sourceBlock["dataset_name"].(string)
+	sourceName := sourceBlock["name"].(string)
+	source := datafactory.DataFlowSource{
+		Dataset: &datafactory.DatasetReference{
+			Type:          &datasetReferenceType,
+			ReferenceName: &referenceName,
+		},
+		Name: &sourceName,
+	}
+	return source
+}
+func flattenDataFactoryMappingDataFlowSources(input []datafactory.DataFlowSource) []interface{} {
+	output := make([]interface{}, 0)
+	for _, source := range input {
+		output = append(output, expandDataFactoryMappingDataFlowSource(source))
+	}
+	return output
+}
+func flattenDataFactoryMappingDataFlowSource(input *datafactory.DataFlowSource) interface{} {
+	output := make(map[string]interface{})
+	output["dataset_name"] = input.Dataset.ReferenceName
+	output["name"] = input.Name
+	return output
 }
 
-func expandDataFactoryMappingDataFlowSourceDataSetReference(input interface{}) *datafactory.DataFlowSource {
+// Read Data Sink blocks
+func expandDataFactoryMappingDataFlowSinks(input []interface{}) []datafactory.DataFlowSink {
+	output := make([]datafactory.DataFlowSink, 0)
+	for _, sink := range input {
+		output = append(output, expandDataFactoryMappingDataFlowSink(sink))
+	}
+	return output
+}
 
+func expandDataFactoryMappingDataFlowSink(input interface{}) datafactory.DataFlowSink {
+	sinkBlock := input.(map[string]interface{})
+
+	datasetReferenceType := "DatasetReference"
+	referenceName := sinkBlock["dataset_name"].(string)
+	sinkName := sinkBlock["name"].(string)
+
+	sink := datafactory.DataFlowSink{
+		Dataset: &datafactory.DatasetReference{
+			Type:          &datasetReferenceType,
+			ReferenceName: &referenceName,
+		},
+		Name: &sinkName,
+	}
+	return sink
+}
+func flattenDataFactoryMappingDataFlowSinks(input []datafactory.DataFlowSink) []interface{} {
+	output := make([]interface{}, 0)
+	for _, source := range input {
+		output = append(output, expandDataFactoryMappingDataFlowSource(source))
+	}
+	return output
+}
+func flattenDataFactoryMappingDataFlowSink(input *datafactory.DataFlowSink) interface{} {
+	output := make(map[string]interface{})
+	output["dataset_name"] = input.Dataset.ReferenceName
+	output["name"] = input.Name
+	return output
+}
+
+// Read Data Transformation Blocks
+func expandDataFactoryMappingDataFlowTransformations(input []interface{}) []datafactory.Transformation {
+	output := make([]datafactory.Transformation, 0)
+	for _, transformation := range input {
+		output = append(output, expandDataFactoryMappingDataFlowTransformation(transformation))
+	}
+	return output
+}
+
+func expandDataFactoryMappingDataFlowTransformation(input interface{}) datafactory.Transformation {
+	// prepare object
+	transBlock := input.(map[string]interface{})
+	transformationName := transBlock["name"].(string)
+	transformation := datafactory.Transformation{
+		Name: &transformationName,
+	}
+	return transformation
+}
+func flattenDataFactoryMappingDataFlowTransformations(input []datafactory.Transformation) []interface{} {
+	output := make([]interface{}, 0)
+	for _, source := range input {
+		output = append(output, expandDataFactoryMappingDataFlowSource(source))
+	}
+	return output
+}
+func flattenDataFactoryMappingDataFlowTransformation(input *datafactory.Transformation) interface{} {
+	output := make(map[string]interface{})
+	output["name"] = input.Name
+	return output
 }
